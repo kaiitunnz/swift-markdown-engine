@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Honor cursor exclusion zones during cursor updates over editor overlays.
 - Keep the clicked table row and following text visible when switching between rendered tables and editable source.
 
 ## [0.10.0] - 2026-07-15

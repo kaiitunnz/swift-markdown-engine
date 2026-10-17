@@ -48,6 +48,19 @@ extension NativeTextView {
         }
     }
 
+    override func cursorUpdate(with event: NSEvent) {
+        if isInCursorExclusionZone(event) {
+            if isEditable { NSCursor.arrow.set() }
+        } else if isEditable, isOverTaskCheckboxBox(event) {
+            NSCursor.arrow.set()
+        } else if isEditable, isOverWideTableOverlay(event) {
+            NSCursor.arrow.set()
+        } else {
+            super.cursorUpdate(with: event)
+            applyReadOnlyCursor(for: event)
+        }
+    }
+
     /// True when the pointer is over a wide-table overlay's HORIZONTAL
     /// SCROLLER (mirrors the task-checkbox suppression above; read-only mode
     /// already shows the arrow via `applyReadOnlyCursor`). Only the scroller
