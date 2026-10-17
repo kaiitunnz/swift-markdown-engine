@@ -50,11 +50,20 @@ struct ListEditPlan {
         let intermediate = applying(edits, to: source)
         var newLines = lines(intermediate, codeRanges: [])
         let nextID = oldLines.count
-        let survivingStarts = Dictionary(oldLines.compactMap { line -> (Int, Line)? in
+        var survivingStarts: [Int: Line] = [:]
+        var editIndex = 0
+        var delta = 0
+        for line in oldLines {
             let anchor = line.range.location + line.whitespace.utf16.count
-            if edits.contains(where: { $0.range.length > 0 && NSLocationInRange(anchor, $0.range) }) { return nil }
-            return (map(anchor, through: edits), line)
-        }, uniquingKeysWith: { first, _ in first })
+            while editIndex < edits.count, NSMaxRange(edits[editIndex].range) <= anchor {
+                let edit = edits[editIndex]
+                delta += edit.text.utf16.count - edit.range.length
+                editIndex += 1
+            }
+            if editIndex < edits.count, NSLocationInRange(anchor, edits[editIndex].range) { continue }
+            let mappedAnchor = anchor + delta
+            if survivingStarts[mappedAnchor] == nil { survivingStarts[mappedAnchor] = line }
+        }
         for index in newLines.indices {
             let anchor = newLines[index].range.location + newLines[index].whitespace.utf16.count
             if let old = survivingStarts[anchor] {
@@ -187,7 +196,7 @@ struct ListEditPlan {
         var location = 0
         let orderedCodeRanges = codeRanges.sorted { $0.location < $1.location }
         var codeIndex = 0
-        var fence: (Character, Int)?
+        var fence: (character: Character, length: Int, columns: Int)?
         repeat {
             var start = 0, end = 0, contentsEnd = 0
             text.getLineStart(&start, end: &end, contentsEnd: &contentsEnd, for: NSRange(location: location, length: 0))
@@ -196,15 +205,16 @@ struct ListEditPlan {
             let whitespace = String(content.prefix { $0 == " " || $0 == "\t" })
             let columns = whitespace.reduce(0) { $1 == "\t" ? ($0 / 4 + 1) * 4 : $0 + 1 }
             let trimmed = content.dropFirst(whitespace.count)
+            if let current = fence, current.columns >= 4, !trimmed.isEmpty, columns < current.columns { fence = nil }
             var fenced = fence != nil
             if let character = trimmed.first, character == "`" || character == "~" {
                 let run = trimmed.prefix { $0 == character }.count
                 if run >= 3 {
                     if let current = fence {
-                        if current.0 == character, run >= current.1,
+                        if current.character == character, run >= current.length,
                            trimmed.dropFirst(run).allSatisfy({ $0 == " " || $0 == "\t" }) { fence = nil }
                     } else if character != "`" || !trimmed.dropFirst(run).contains("`") {
-                        fence = (character, run)
+                        fence = (character, run, columns)
                         fenced = true
                     }
                 }

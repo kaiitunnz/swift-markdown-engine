@@ -214,13 +214,18 @@ struct ListEditingTests {
         }
     }
 
-    @Test(arguments: [" ```code```", "  ```language`text"])
-    func inlineBackticksDoNotDisableFollowingLists(paragraph: String) {
+    @Test(arguments: [" ```code```", "  ```language`text", "    ```\n    8. Code", "    ~~~\n    8. Code"])
+    func codeParagraphsDoNotDisableFollowingLists(paragraph: String) {
         let source = paragraph + "\n\n1. Alpha\n2. Beta\n3. Gamma"
         let (view, coordinator) = makeEditor(source)
         view.setSelectedRange(NSRange(location: NSMaxRange((view.string as NSString).range(of: "Beta")), length: 0))
         view.insertText("\t", replacementRange: view.selectedRange())
         #expect(view.string == paragraph + "\n\n1. Alpha\n\t1. Beta\n2. Gamma")
+        #expect(coordinator.lastComputedStorage == view.string)
+        _ = coordinator.textView(view, doCommandBy: #selector(NSResponder.insertBacktab(_:)))
+        #expect(view.string == source)
+        view.insertText("\n", replacementRange: view.selectedRange())
+        #expect(view.string == paragraph + "\n\n1. Alpha\n2. Beta\n3. \n4. Gamma")
         #expect(coordinator.lastComputedStorage == view.string)
     }
 
