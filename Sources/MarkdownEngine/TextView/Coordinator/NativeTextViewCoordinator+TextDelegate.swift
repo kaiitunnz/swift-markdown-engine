@@ -841,46 +841,21 @@ extension NativeTextViewCoordinator {
     }
 
     func handleBacktab(_ textView: NSTextView) -> Bool {
-        let nsText = textView.string as NSString
+        let source = textView.string
+        let codeTokens = parsedDocument(for: source).codeTokens
+        if configuration.lists.helpersEnabled,
+           !textView.hasMarkedText(),
+           !MarkdownDetection.isInsideCodeBlock(location: textView.selectedRange().location, codeTokens: codeTokens),
+           let plan = ListEditPlan.indent(source, selection: textView.selectedRange(), backward: true,
+                                          maximumDepth: configuration.lists.maximumNestingLevel,
+                                          codeRanges: codeTokens.filter { $0.kind == .codeBlock }.map(\.range)) {
+            plan.apply(to: textView)
+            return true
+        }
+        let nsText = source as NSString
         let caretLoc = textView.selectedRange().location
         let lineRange = nsText.lineRange(for: NSRange(location: caretLoc, length: 0))
         let line = nsText.substring(with: lineRange)
-
-        let pattern = #"^([\t ]*)((\d+)\.|[-•*+])\s"#
-        let regex = try? NSRegularExpression(pattern: pattern)
-        if let regex = regex,
-           let match = regex.firstMatch(in: line, range: NSRange(location: 0, length: line.utf16.count)) {
-            let wsRangeLocal = match.range(at: 1)
-            let wsString = (line as NSString).substring(with: wsRangeLocal)
-            let wsDocStart = lineRange.location + wsRangeLocal.location
-            let depth = MarkdownLists.indentLevel(from: wsString)
-            // Legacy `\t• ` top-level depth=1 (synthetic tab); new format depth=0.
-            let markerString = (line as NSString).substring(with: match.range(at: 2))
-            let isLegacyBulletGlyph = markerString.first == "•"
-            let minDepth = isLegacyBulletGlyph ? 1 : 0
-            if depth <= minDepth {
-                return true
-            }
-
-            if wsRangeLocal.length > 0 {
-                if wsString.hasPrefix("\t") {
-                    MarkdownLists.performEdit(textView, replace: NSRange(location: wsDocStart, length: 1), with: "")
-                    textView.setSelectedRange(NSRange(location: max(0, caretLoc - 1), length: 0))
-                    return true
-                } else {
-                    var removeCount = 0
-                    for ch in wsString {
-                        if ch == " " && removeCount < 2 { removeCount += 1 } else { break }
-                    }
-                    if removeCount == 0 { removeCount = min(2, wsRangeLocal.length) }
-                    MarkdownLists.performEdit(textView, replace: NSRange(location: wsDocStart, length: removeCount), with: "")
-                    textView.setSelectedRange(NSRange(location: max(0, caretLoc - removeCount), length: 0))
-                    return true
-                }
-            } else {
-                return true
-            }
-        }
 
         if line.hasPrefix("\t") {
             MarkdownLists.performEdit(textView, replace: NSRange(location: lineRange.location, length: 1), with: "")

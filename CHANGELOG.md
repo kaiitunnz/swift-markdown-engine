@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Keep ordered list numbering, selection, link metadata, and undo consistent when indenting, outdenting, or continuing items.
 - Keep the clicked table row and following text visible when switching between rendered tables and editable source.
 
 ## [0.10.0] - 2026-07-15

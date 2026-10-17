@@ -37,7 +37,7 @@ struct MarkdownLists {
 
     // Markers: `-`/`*`/`+` (raw Markdown) + legacy `•` (rendered, never typed).
     static let listRegex = try! NSRegularExpression(
-        pattern: #"^\s*((?:(\d+)\.|[-•*+])(?:\s+\[[ xX]\])?\s+)"#
+        pattern: #"^\s*((?:(\d+)[.)]|[-•*+])(?:\s+\[[ xX]\])?\s+)"#
     )
     /// Blockquote line: ≤3 indent + `>` marker run; group 1 = whitespace, group 2 = markers.
     // Trailing `[ \t]*` so the prefix length covers the space(s) the continuation
@@ -59,17 +59,23 @@ struct MarkdownLists {
     private static func removeLinePrefixAndExit(
         textView: NSTextView,
         currentLineRange: NSRange,
-        prefixLength: Int
+        prefixLength: Int,
+        renumberLists: Bool = false
     ) -> Bool {
-        let lineEnd = currentLineRange.location + currentLineRange.length
-        let hasNewline = currentLineRange.length > 0
-            && (textView.string as NSString)
-                .substring(with: NSRange(location: lineEnd - 1, length: 1)) == "\n"
-        let maxBodyLen = hasNewline ? currentLineRange.length - 1 : currentLineRange.length
-        let removalLength = min(prefixLength, maxBodyLen)
+        let ns = textView.string as NSString
+        var contentEnd = 0
+        ns.getLineStart(nil, end: nil, contentsEnd: &contentEnd, for: currentLineRange)
+        let removalLength = min(prefixLength, contentEnd - currentLineRange.location)
         let removalRange = NSRange(location: currentLineRange.location, length: removalLength)
-        performEdit(textView, replace: removalRange, with: "")
-        textView.setSelectedRange(NSRange(location: currentLineRange.location, length: 0))
+        if renumberLists {
+            let source = textView.string
+            ListEditPlan.replacing(source, edits: [.init(range: removalRange, text: "")],
+                                   selection: textView.selectedRange(), codeRanges: codeRanges(in: source, textView: textView),
+                                   selectionAfterEdit: NSRange(location: currentLineRange.location, length: 0)).apply(to: textView)
+        } else {
+            performEdit(textView, replace: removalRange, with: "")
+            textView.setSelectedRange(NSRange(location: currentLineRange.location, length: 0))
+        }
         return false
     }
 
@@ -91,6 +97,13 @@ struct MarkdownLists {
         let markers = nsLine.substring(with: match.range(at: 2))
         let prefix = ws + markers + " "
         return pasted.replacingOccurrences(of: "\n", with: "\n" + prefix)
+    }
+
+    private static func codeRanges(in source: String, textView: NSTextView) -> [NSRange] {
+        let tokens = (textView.delegate as? NativeTextViewCoordinator)?.parsedDocument(for: source).codeTokens
+            ?? MarkdownTokenizer.parseTokensViaAST(in: source,
+                registry: (textView as? NativeTextView)?.configuration.extensionRegistry ?? .empty)
+        return tokens.filter { $0.kind == .codeBlock }.map(\.range)
     }
 
     // MARK: - Input Handling
@@ -121,11 +134,12 @@ struct MarkdownLists {
             return false
         }
 
-        let isInCodeBlock = isInsideCodeBlock ?? (
+        let isInCodeBlock = (isInsideCodeBlock ?? (
             textView.string.contains("`")
                 ? MarkdownDetection.isInsideCodeBlock(location: affectedCharRange.location, in: textView.string)
                 : false
-        )
+        )) || ((replacementString == "\t" || replacementString == "\n") &&
+               ListEditPlan.isCode(at: affectedCharRange.location, in: textView.string))
 
         if replacementString == ">" && affectedCharRange.length == 0 && !isInCodeBlock {
             let insertionLocation = affectedCharRange.location
@@ -177,29 +191,24 @@ struct MarkdownLists {
 
         // TAB: indent list items (skip in code blocks)
         if replacementString == "\t" && !isInCodeBlock {
-            guard listsEnabled else { return true }
-            let nsText = textView.string as NSString
+            guard listsEnabled, !textView.hasMarkedText() else { return true }
+            let source = textView.string
+            let codeRanges = codeRanges(in: source, textView: textView)
+            if let plan = ListEditPlan.indent(source, selection: affectedCharRange, backward: false,
+                                              maximumDepth: activeConfig.lists.maximumNestingLevel, codeRanges: codeRanges) {
+                plan.apply(to: textView)
+                return false
+            }
+            let nsText = source as NSString
             let insertionLocation = affectedCharRange.location
             let safeLocTAB = min(affectedCharRange.location, nsText.length)
             let currentLineRange = nsText.lineRange(for: NSRange(location: safeLocTAB, length: 0))
             let currentLine = nsText.substring(with: currentLineRange)
-            if MarkdownLists.listRegex.firstMatch(in: currentLine, range: NSRange(location: 0, length: currentLine.utf16.count)) != nil {
-                if let wsMatch = MarkdownLists.leadingWhitespaceRegex.firstMatch(in: currentLine, range: NSRange(location: 0, length: currentLine.utf16.count)) {
-                    let ws = (currentLine as NSString).substring(with: wsMatch.range)
-                    let level = MarkdownLists.indentLevel(from: ws)
-                    if level >= MarkdownEditorConfiguration.default.lists.maximumNestingLevel {
-                        return false
-                    }
-                }
-                MarkdownLists.performEdit(textView, replace: NSRange(location: currentLineRange.location, length: 0), with: "\t")
-                textView.setSelectedRange(NSRange(location: insertionLocation + 1, length: 0))
-                return false
-            }
             if MarkdownLists.dashNoSpaceRegex.firstMatch(in: currentLine, range: NSRange(location: 0, length: currentLine.utf16.count)) != nil {
                 if let wsMatch = MarkdownLists.leadingWhitespaceRegex.firstMatch(in: currentLine, range: NSRange(location: 0, length: currentLine.utf16.count)) {
                     let ws = (currentLine as NSString).substring(with: wsMatch.range)
                     let level = MarkdownLists.indentLevel(from: ws)
-                    if level >= MarkdownEditorConfiguration.default.lists.maximumNestingLevel { return false }
+                    if level >= activeConfig.lists.maximumNestingLevel { return false }
                 }
                 MarkdownLists.performEdit(textView, replace: NSRange(location: currentLineRange.location, length: 0), with: "\t")
                 textView.setSelectedRange(NSRange(location: insertionLocation + 1, length: 0))
@@ -250,7 +259,7 @@ struct MarkdownLists {
             }
 
             // Skip list / blockquote continuation in code blocks.
-            guard listsEnabled && !isInCodeBlock else { return true }
+            guard listsEnabled && !isInCodeBlock && !textView.hasMarkedText() else { return true }
 
             // Blockquote continuation: `> foo` → `\n> `, `>>>` stays `>>>`, empty marker → exit.
             let quoteLine = nsText.substring(with: currentLineRange)
@@ -288,7 +297,8 @@ struct MarkdownLists {
                     return removeLinePrefixAndExit(
                         textView: textView,
                         currentLineRange: currentLineRange,
-                        prefixLength: match.range.location + match.range.length
+                        prefixLength: match.range.location + match.range.length,
+                        renumberLists: true
                     )
                 }
                 let leadingWhitespace: String
@@ -300,24 +310,29 @@ struct MarkdownLists {
                 let markerRaw = (listLine as NSString).substring(with: match.range(at: 1))
                 let marker = markerRaw.trimmingCharacters(in: .whitespaces)
                 let hasCheckbox = marker.range(of: #"\[[ xX]\]"#, options: .regularExpression) != nil
+                let newline = listLine.hasSuffix("\r\n") || (!listLine.hasSuffix("\n") && (textView.string.contains("\r\n"))) ? "\r\n" : "\n"
+                let delimiter = marker.drop(while: { $0.isNumber }).first ?? "."
                 let newListItem: String
                 if match.range(at: 2).location != NSNotFound,
                    let number = Int((listLine as NSString).substring(with: match.range(at: 2))) {
                     if hasCheckbox {
-                        newListItem = "\n" + leadingWhitespace + "\(number + 1). [ ] "
+                        newListItem = newline + leadingWhitespace + "\(number + 1)\(delimiter) [ ] "
                     } else {
-                        newListItem = "\n" + leadingWhitespace + "\(number + 1). "
+                        newListItem = newline + leadingWhitespace + "\(number + 1)\(delimiter) "
                     }
                 } else {
                     // Continue with the user's marker char (legacy `•` → `-`), keeping leading whitespace.
                     let bulletChar = (marker.first == "•") ? "-" : String(marker.prefix(1))
                     if hasCheckbox {
-                        newListItem = "\n" + leadingWhitespace + bulletChar + " [ ] "
+                        newListItem = newline + leadingWhitespace + bulletChar + " [ ] "
                     } else {
-                        newListItem = "\n" + leadingWhitespace + bulletChar + " "
+                        newListItem = newline + leadingWhitespace + bulletChar + " "
                     }
                 }
-                MarkdownLists.performEdit(textView, replace: affectedCharRange, with: newListItem)
+                let source = textView.string
+                ListEditPlan.replacing(source, edits: [.init(range: affectedCharRange, text: newListItem)],
+                                       selection: textView.selectedRange(), codeRanges: codeRanges(in: source, textView: textView),
+                                       selectionAfterEdit: NSRange(location: affectedCharRange.location + newListItem.utf16.count, length: 0)).apply(to: textView)
                 return false
             }
         }
