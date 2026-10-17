@@ -21,6 +21,7 @@ final class NativeTextView: NSTextView {
     var baseContentHeight: CGFloat = 0
     var activeBottomOverscroll: CGFloat = 0
     var isApplyingManagedFrameSize = false
+    var pendingTableViewportAnchor: TableViewportAnchor?
     /// Set on switch/resize to force full-layout height measurement until the cascade settles.
     var pendingFullLayoutMeasure = false
     /// Coalesces wide-table overlay updates to once per runloop (resize fires many per frame).

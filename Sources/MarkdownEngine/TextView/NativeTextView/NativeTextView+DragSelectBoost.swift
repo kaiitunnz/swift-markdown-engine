@@ -12,6 +12,7 @@ import AppKit
 
 extension NativeTextView {
     override func mouseDown(with event: NSEvent) {
+        activateRenderedTable(at: event)
         // Was the click point on a link? Captured before super.mouseDown, which
         // may park the caret elsewhere. Used to rescue a dropped link click.
         let clickPointOnLink: Bool = {

@@ -472,10 +472,16 @@ extension NativeTextViewCoordinator {
                 currentActiveTokenIndices: activeTokenIndices,
                 previousActiveTokenIndices: previousActiveTokenIndices
             ))
+            let tableChanged = activeTokenIndices.symmetricDifference(previousActiveTokenIndices).contains {
+                tokens.indices.contains($0) && tokens[$0].kind == .table
+            }
+            let nativeView = tv as? NativeTextView
+            let tableAnchor = tableChanged ? nativeView?.takeTableViewportAnchor(at: selRange.location) : nil
             PerfTrace.measure("selRestyle") {
                 restyleTextView(tv, paragraphCandidates: paragraphCandidates, tokens: tokens,
                                 classified: parsed.classified, blocks: parsed.blocks)
             }
+            if tableChanged { nativeView?.settleTableTransition(anchor: tableAnchor) }
         }
 
         // Auto-select content when clicking (mouse) into a rendered (previously inactive) latex or image embed
@@ -572,7 +578,8 @@ extension NativeTextViewCoordinator {
             self.onInlineSelectionChange?(inlineSelectionState)
         }
 
-        self.previousActiveTokenIndices = self.activeTokenIndices
+        // A drag defers styling; retain the styled token state until release.
+        if !isDragSelecting { self.previousActiveTokenIndices = self.activeTokenIndices }
         self.previousCaretLocation = caretLoc
 
         // Skip during a pending edit — viewRect is stale until textDidChange's restyle runs; otherwise the overlay flashes to the old Y before settling.

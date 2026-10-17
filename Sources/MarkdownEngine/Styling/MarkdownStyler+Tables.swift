@@ -25,11 +25,21 @@ extension MarkdownStyler {
         let rows: [[String]]
     }
 
+    final class RenderedTable: NSObject {
+        let image: NSImage
+        let rowTops: [CGFloat]
+
+        init(image: NSImage, rowTops: [CGFloat]) {
+            self.image = image
+            self.rowTops = rowTops
+        }
+    }
+
     /// Rendered-table image cache. A table's pixels depend only on its source,
     /// font, colors, and appearance — so identical keys can reuse the NSImage
     /// instead of re-rendering every inactive table on every keystroke.
-    private static let tableImageCache: NSCache<NSString, NSImage> = {
-        let cache = NSCache<NSString, NSImage>()
+    private static let tableImageCache: NSCache<NSString, RenderedTable> = {
+        let cache = NSCache<NSString, RenderedTable>()
         // Must exceed a document's unique-table count or a full restyle (load /
         // theme / font change) re-renders every table (same thrash class as the
         // metadata cap). NSCache still auto-evicts under memory pressure.
@@ -140,7 +150,7 @@ extension MarkdownStyler {
         ctx: StylingContext,
         appearance: NSAppearance,
         availableWidth: CGFloat
-    ) -> (image: NSImage, rendered: Bool) {
+    ) -> (image: NSImage, rowTops: [CGFloat], rendered: Bool) {
         let widthKey = Int(availableWidth.rounded())
         // The extension registry is part of the key: `==x==` in a cell renders
         // highlighted under one config and literal under another — those must
@@ -148,9 +158,9 @@ extension MarkdownStyler {
         let extensionKey = ctx.configuration.extensionRegistry.fingerprint
         let key = (themeKeyPrefix(ctx: ctx, appearance: appearance) + "|x\(extensionKey)|w\(widthKey)|" + source) as NSString
         if let cached = tableImageCache.object(forKey: key) {
-            return (cached, false)
+            return (cached.image, cached.rowTops, false)
         }
-        let image = renderTable(
+        let renderedTable = renderTable(
             parsed,
             baseFont: ctx.baseFont,
             theme: ctx.configuration.theme,
@@ -160,8 +170,8 @@ extension MarkdownStyler {
             availableWidth: availableWidth,
             extensions: ctx.configuration.extensions
         )
-        tableImageCache.setObject(image, forKey: key)
-        return (image, true)
+        tableImageCache.setObject(renderedTable, forKey: key)
+        return (renderedTable.image, renderedTable.rowTops, true)
     }
 
     static func styleTables(_ ctx: StylingContext) -> [StyledRange] {
@@ -239,7 +249,7 @@ extension MarkdownStyler {
             // only exceeds it when the per-column floors genuinely don't fit,
             // in which case the scrollable overlay below takes over.
             let containerWidth = effectiveContainerWidth(for: ctx)
-            let (image, rendered) = tableImage(
+            let (image, rowTops, rendered) = tableImage(
                 for: source,
                 parsed: parsed,
                 ctx: ctx,
@@ -273,6 +283,20 @@ extension MarkdownStyler {
                 ctx: ctx,
                 attrs: &attrs
             )
+            let leadingUnits = source.utf16.prefix { unit in
+                UnicodeScalar(UInt32(unit)).map(CharacterSet.whitespacesAndNewlines.contains) ?? false
+            }.count
+            let anchor = token.contentRange.location + leadingUnits
+            var rowOffsets: [Int] = []
+            (source as NSString).enumerateSubstrings(in: NSRange(location: 0, length: (source as NSString).length), options: .byLines) { line, range, _, _ in
+                if let line, !line.trimmingCharacters(in: .whitespaces).isEmpty {
+                    rowOffsets.append(range.location - leadingUnits)
+                }
+            }
+            if rowOffsets.count > 1 { rowOffsets.remove(at: 1) }
+            attrs.append((NSRange(location: anchor, length: 1), [
+                .tableRowGeometry: TableRowGeometry(rowTops: rowTops, sourceOffsets: rowOffsets)
+            ]))
         }
         if tableCount > 0 {
             let ms = Double(DispatchTime.now().uptimeNanoseconds - tablesT0) / 1_000_000
@@ -454,7 +478,7 @@ extension MarkdownStyler {
         appearance: NSAppearance,
         availableWidth: CGFloat,
         extensions: [any MarkdownExtension] = []
-    ) -> NSImage {
+    ) -> RenderedTable {
         let columnCount = table.alignments.count
         let cellHPadding: CGFloat = 12
         let cellVPadding: CGFloat = 6
@@ -601,7 +625,7 @@ extension MarkdownStyler {
         let headerFill = mutedColor(alpha: 0.08)
 
         // Flipped image so AppKit handles the y-flip; a manual transform mirror would flip glyphs too.
-        return NSImage(size: size, flipped: true) { _ in
+        let image = NSImage(size: size, flipped: true) { _ in
             // Header row fill
             headerFill.setFill()
             NSBezierPath(rect: NSRect(
@@ -676,6 +700,7 @@ extension MarkdownStyler {
             }
             return true
         }
+        return RenderedTable(image: image, rowTops: rowTop)
     }
 
     // MARK: - Scrollable table helpers

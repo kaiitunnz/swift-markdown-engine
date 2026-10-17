@@ -152,7 +152,17 @@ final class WideTableImageView: NSImageView {
             super.mouseDown(with: event)
             return
         }
-        let location = overlay.anchorTextLocation
+        let anchor = overlay.anchorTextLocation
+        let point = convert(event.locationInWindow, from: nil)
+        let imageY = isFlipped ? point.y : bounds.height - point.y
+        if let storage = textView.textStorage, anchor >= 0, anchor < storage.length,
+           let geometry = storage.attribute(.tableRowGeometry, at: anchor, effectiveRange: nil) as? TableRowGeometry,
+           let row = geometry.row(at: imageY) {
+            _ = textView.activateTableRow(anchor: anchor, row: row, event: event)
+            textView.mouseDown(with: event)
+            return
+        }
+        let location = anchor
         let docLen = (textView.string as NSString).length
         guard location >= 0, location <= docLen else {
             super.mouseDown(with: event)

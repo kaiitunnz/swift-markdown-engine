@@ -13,6 +13,7 @@ import AppKit
 // MARK: - Custom attribute keys for rendering overlays
 
 extension NSAttributedString.Key {
+    static let tableRowGeometry = NSAttributedString.Key("TableRowGeometry")
     static let latexImage = NSAttributedString.Key("LatexRenderedImage")
     static let latexBounds = NSAttributedString.Key("LatexImageBounds")
     static let latexIsBlock = NSAttributedString.Key("LatexIsBlock")
@@ -337,6 +338,21 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
         }
         return CGRect(x: pos.x, y: yPosition,
                        width: imageBounds.width, height: imageBounds.height)
+    }
+
+    func renderedTableHit(at point: CGPoint) -> (anchor: Int, row: Int)? {
+        guard let ts = textStorage, let range = fragmentNSRange, range.length > 0 else { return nil }
+        var hit: (Int, Int)?
+        ts.enumerateAttribute(.tableRowGeometry, in: range) { value, attrRange, stop in
+            guard let geometry = value as? TableRowGeometry,
+                  let bounds = ts.attribute(.latexBounds, at: attrRange.location, effectiveRange: nil) as? NSValue,
+                  let rect = blockImageDrawRect(attrRange: attrRange, imageBounds: bounds.rectValue,
+                                               blockOffsetY: nil, point: .zero),
+                  rect.contains(point), let row = geometry.row(at: point.y - rect.minY) else { return }
+            hit = (attrRange.location, row)
+            stop.pointee = true
+        }
+        return hit
     }
 
     /// Returns the rects of all block images in this fragment, relative to
