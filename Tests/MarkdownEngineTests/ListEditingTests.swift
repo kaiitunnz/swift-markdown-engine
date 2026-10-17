@@ -214,7 +214,10 @@ struct ListEditingTests {
         }
     }
 
-    @Test(arguments: [" ```code```", "  ```language`text", "    ```\n    8. Code", "    ~~~\n    8. Code"])
+    @Test(arguments: [" ```code```", "  ```language`text", "    ```\n    8. Code", "    ~~~\n    8. Code",
+                      "- Parent\n  ```\n  8. Code", "- Parent\n   ~~~\n  8. Code",
+                      "1. Parent\n   ```\n   8. Code\n\nAfter code", "        ```\n    8. Code",
+                      "  ```\n8. Code\n ```", "- Parent\n   ```\n  8. Code\n  ```"])
     func codeParagraphsDoNotDisableFollowingLists(paragraph: String) {
         let source = paragraph + "\n\n1. Alpha\n2. Beta\n3. Gamma"
         let (view, coordinator) = makeEditor(source)
@@ -227,6 +230,17 @@ struct ListEditingTests {
         view.insertText("\n", replacementRange: view.selectedRange())
         #expect(view.string == paragraph + "\n\n1. Alpha\n2. Beta\n3. \n4. Gamma")
         #expect(coordinator.lastComputedStorage == view.string)
+    }
+
+    @Test(arguments: [" ```\n8. Code", "  ~~~\n8. Code", "   ```\n8. Code", "- Parent\n   ```\n  8. Code", "    ```\n    8. Code\n    ```\n    9. Other",
+                      "- Parent\n  ```\n      ```\n  8. Code", " ```\n    ```\n8. Code"])
+    func openFencesKeepTheirCodeProtected(source: String) {
+        for insertion in ["\t", "\n"] {
+            let (view, _) = makeEditor(source)
+            view.setSelectedRange(NSRange(location: (view.string as NSString).length, length: 0))
+            view.insertText(insertion, replacementRange: view.selectedRange())
+            #expect(view.string == source + insertion)
+        }
     }
 
     @Test func consecutiveStructuralKeysHaveSeparateUndoActions() throws {

@@ -196,7 +196,8 @@ struct ListEditPlan {
         var location = 0
         let orderedCodeRanges = codeRanges.sorted { $0.location < $1.location }
         var codeIndex = 0
-        var fence: (character: Character, length: Int, columns: Int)?
+        var fence: (character: Character, length: Int, minimumColumns: Int?, maximumClosingColumns: Int?)?
+        var containers: [(markerColumns: Int, contentColumns: Int)] = []
         repeat {
             var start = 0, end = 0, contentsEnd = 0
             text.getLineStart(&start, end: &end, contentsEnd: &contentsEnd, for: NSRange(location: location, length: 0))
@@ -205,16 +206,22 @@ struct ListEditPlan {
             let whitespace = String(content.prefix { $0 == " " || $0 == "\t" })
             let columns = whitespace.reduce(0) { $1 == "\t" ? ($0 / 4 + 1) * 4 : $0 + 1 }
             let trimmed = content.dropFirst(whitespace.count)
-            if let current = fence, current.columns >= 4, !trimmed.isEmpty, columns < current.columns { fence = nil }
+            if let minimum = fence?.minimumColumns, !trimmed.isEmpty, columns < minimum { fence = nil }
+            if fence == nil, !trimmed.isEmpty {
+                while let parent = containers.last, parent.contentColumns > columns { containers.removeLast() }
+            }
             var fenced = fence != nil
             if let character = trimmed.first, character == "`" || character == "~" {
                 let run = trimmed.prefix { $0 == character }.count
                 if run >= 3 {
                     if let current = fence {
-                        if current.character == character, run >= current.length,
+                        if let maximum = current.maximumClosingColumns, columns <= maximum,
+                           current.character == character, run >= current.length,
                            trimmed.dropFirst(run).allSatisfy({ $0 == " " || $0 == "\t" }) { fence = nil }
                     } else if character != "`" || !trimmed.dropFirst(run).contains("`") {
-                        fence = (character, run, columns)
+                        let base = containers.last?.contentColumns ?? 0
+                        let minimum = columns >= base + 4 ? base + 4 : (base > 0 ? base : nil)
+                        fence = (character, run, minimum, columns < base + 4 ? base + 3 : nil)
                         fenced = true
                     }
                 }
@@ -225,6 +232,9 @@ struct ListEditPlan {
             var prefix: Prefix?
             if !code, let match = marker.firstMatch(in: content, range: NSRange(location: 0, length: content.utf16.count)) {
                 let ns = content as NSString
+                while let parent = containers.last, parent.markerColumns >= columns { containers.removeLast() }
+                let contentColumns = ns.substring(with: match.range).reduce(0) { $1 == "\t" ? ($0 / 4 + 1) * 4 : $0 + 1 }
+                containers.append((columns, contentColumns))
                 let digits = match.range(at: 2).location == NSNotFound ? "" : ns.substring(with: match.range(at: 2))
                 prefix = Prefix(number: Int(digits), digits: digits,
                                 delimiter: match.range(at: 3).location == NSNotFound ? "" : ns.substring(with: match.range(at: 3)),
