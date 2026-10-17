@@ -214,6 +214,16 @@ struct ListEditingTests {
         }
     }
 
+    @Test(arguments: [" ```code```", "  ```language`text"])
+    func inlineBackticksDoNotDisableFollowingLists(paragraph: String) {
+        let source = paragraph + "\n\n1. Alpha\n2. Beta\n3. Gamma"
+        let (view, coordinator) = makeEditor(source)
+        view.setSelectedRange(NSRange(location: NSMaxRange((view.string as NSString).range(of: "Beta")), length: 0))
+        view.insertText("\t", replacementRange: view.selectedRange())
+        #expect(view.string == paragraph + "\n\n1. Alpha\n\t1. Beta\n2. Gamma")
+        #expect(coordinator.lastComputedStorage == view.string)
+    }
+
     @Test func consecutiveStructuralKeysHaveSeparateUndoActions() throws {
         let source = "1. Alpha\n2. Beta\n3. Gamma"
         let (view, coordinator) = makeEditor(source)

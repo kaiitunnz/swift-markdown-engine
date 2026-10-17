@@ -203,7 +203,7 @@ struct ListEditPlan {
                     if let current = fence {
                         if current.0 == character, run >= current.1,
                            trimmed.dropFirst(run).allSatisfy({ $0 == " " || $0 == "\t" }) { fence = nil }
-                    } else {
+                    } else if character != "`" || !trimmed.dropFirst(run).contains("`") {
                         fence = (character, run)
                         fenced = true
                     }
